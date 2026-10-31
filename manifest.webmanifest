@@ -1,14 +1,14 @@
 {
   "id": "./",
-  "name": "Badminton sign-ups (TEST)",
-  "short_name": "TEST Badminton",
-  "description": "Sign up for the group's badminton sessions.",
+  "name": "Parle-G Smashers",
+  "short_name": "Parle-G Smashers",
+  "description": "Sign up for Parle-G Smashers badminton sessions.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#9A4A07",
-  "theme_color": "#9A4A07",
+  "background_color": "#1E6B4F",
+  "theme_color": "#1E6B4F",
   "icons": [
     {
       "src": "icon-192.png",
