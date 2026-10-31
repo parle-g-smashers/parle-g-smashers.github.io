@@ -25,7 +25,6 @@
   }
   // The name and colour come from index.html, so the test and live apps can differ
   var APP_NAME = meta('apple-mobile-web-app-title', 'Badminton');
-  var THEME = meta('theme-color', '#1E6B4F');
 
   // ---------- Saved sessions, so the page can show something straight away ----------
   function saveState(state) {
@@ -69,11 +68,12 @@
     });
   }
 
-  var isRuntime = !!document.querySelector('meta[name="bm-runtime"]');
-  if (isRuntime) runtime(); else boot();
+  boot();
 
   // =====================================================================
-  // BOOT: runs in the bare app shell. Gets the page, then swaps it in.
+  // BOOT: runs in the app shell (index.html). Gets the sign-up page and
+  // puts it inside the shell, which keeps the shell's icon, name and colour.
+  // (iPhones only pick up the home-screen icon from the shell itself.)
   // =====================================================================
   function boot() {
     function splashMsg(html) {
@@ -109,53 +109,72 @@
         if (b) b.onclick = fetchPage;
       });
     }
-    // document.open only works once this shell has finished loading
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(start, 0); });
     else setTimeout(start, 0);
   }
 
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-  function escAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 
-  function headExtras() {
-    return [
-      '<meta name="bm-runtime" content="1">',
-      '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
-      '<meta name="theme-color" content="' + escAttr(THEME) + '">',
-      '<meta name="apple-mobile-web-app-capable" content="yes">',
-      '<meta name="mobile-web-app-capable" content="yes">',
-      '<meta name="apple-mobile-web-app-title" content="' + escAttr(APP_NAME) + '">',
-      '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">',
-      '<link rel="manifest" href="' + abs('manifest.webmanifest') + '">',
-      '<link rel="apple-touch-icon" href="' + abs('apple-touch-icon.png') + '">',
-      '<link rel="icon" type="image/png" href="' + abs('icon-192.png') + '">',
-      '<link rel="stylesheet" href="' + abs('app.css') + '">',
-      '<script src="' + abs('config.js') + '"><\/script>',
-      '<script src="' + abs('app.js') + '"><\/script>'
-    ].join('');
+  // Tags the shell already sets itself, so the page's own copies are left out
+  var SKIP_HEAD = /^(meta\[(charset|viewport|theme-color|apple-|mobile-web-app)|link\[(manifest|icon|apple-touch-icon|shortcut icon)\]|title|base|script)/i;
+  function headKey(el) {
+    var tag = el.tagName.toLowerCase();
+    if (tag === 'meta') return 'meta[' + (el.getAttribute('charset') != null ? 'charset' : (el.getAttribute('name') || el.getAttribute('http-equiv') || ''));
+    if (tag === 'link') return 'link[' + (el.getAttribute('rel') || '') + ']';
+    return tag;
   }
 
   function show(html) {
-    var extra = headExtras();
-    var out;
-    if (/<head[^>]*>/i.test(html)) out = html.replace(/<head[^>]*>/i, function (m) { return m + extra; });
-    else if (/<html[^>]*>/i.test(html)) out = html.replace(/<html[^>]*>/i, function (m) { return m + '<head>' + extra + '</head>'; });
-    else out = '<!DOCTYPE html><html><head>' + extra + '</head><body>' + html + '</body></html>';
-    document.open();
-    document.write(out);
-    document.close();
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    installGoogleShim();
+
+    // The splash screen's styles and content go
+    Array.prototype.slice.call(document.querySelectorAll('style')).forEach(function (st) {
+      if (/\.splash/.test(st.textContent)) st.parentNode.removeChild(st);
+    });
+    var css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = abs('app.css');
+    document.head.appendChild(css);
+
+    // The page's styles and fonts
+    Array.prototype.slice.call(doc.head.children).forEach(function (el) {
+      if (SKIP_HEAD.test(headKey(el))) return;
+      document.head.appendChild(document.importNode(el, true));
+    });
+
+    // The page's body, then its scripts in order
+    var body = document.body;
+    while (body.firstChild) body.removeChild(body.firstChild);
+    Array.prototype.slice.call(doc.body.attributes).forEach(function (a) { body.setAttribute(a.name, a.value); });
+    var scripts = [];
+    Array.prototype.slice.call(doc.body.childNodes).forEach(function (node) {
+      if (node.nodeType === 1 && node.tagName === 'SCRIPT') { scripts.push(node); return; }
+      body.appendChild(document.importNode(node, true));
+      if (node.nodeType === 1) Array.prototype.slice.call(body.lastChild.querySelectorAll('script')).forEach(function (inner) {
+        scripts.push(inner); inner.parentNode.removeChild(inner);
+      });
+    });
+    Array.prototype.slice.call(doc.head.querySelectorAll('script')).forEach(function (s) { scripts.unshift(s); });
+
+    (function runNext(i) {
+      if (i >= scripts.length) { afterPage(); return; }
+      var old = scripts[i], s = document.createElement('script');
+      Array.prototype.slice.call(old.attributes).forEach(function (a) { s.setAttribute(a.name, a.value); });
+      if (old.src) {
+        s.onload = s.onerror = function () { runNext(i + 1); };
+        body.appendChild(s);
+      } else {
+        s.text = old.textContent;
+        body.appendChild(s); // inline scripts run straight away
+        runNext(i + 1);
+      }
+    })(0);
   }
 
-  // =====================================================================
-  // RUNTIME: runs inside the swapped-in page, before the page's own code.
-  // =====================================================================
-  function runtime() {
-    installGoogleShim();
-    window.addEventListener('DOMContentLoaded', function () {
-      fixViewport();
-      refreshCachedPage();
-      setupInstallAndNotifications();
-    });
+  function afterPage() {
+    refreshCachedPage();
+    setupInstallAndNotifications();
   }
 
   // The page talks to the sheet with google.script.run, which only exists
@@ -227,12 +246,6 @@
       host: { close: function () {}, setHeight: function () {}, setWidth: function () {}, editor: { focus: function () {} } },
       history: { push: function () {}, replace: function () {}, setChangeHandler: function () {} }
     };
-  }
-
-  // Keep one viewport tag, ours, so the page fits around the notch and home bar.
-  function fixViewport() {
-    var tags = document.querySelectorAll('meta[name="viewport"]');
-    for (var i = 1; i < tags.length; i++) tags[i].parentNode.removeChild(tags[i]);
   }
 
   // Get the latest version of the page in the background, ready for next time.
